@@ -60,6 +60,9 @@ def update_image_canvas_single(index, data, source):
                        .iloc[index])
     image = imread(filename)
     source.data = {'image': [image], 'x': [0], 'y': [0], 'dx': [1], 'dy': [1]}
+    print(source.data)
+    print("\nFilename: " + filename + '\n')
+    print('#'*80)
 
 
 def update_image_canvas_multi(indices, data, source, max_images=25):
