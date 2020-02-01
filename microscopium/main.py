@@ -7,13 +7,18 @@ import argparse
 import ast
 
 # dependencies
+from importlib import import_module
+
 import numpy as np
+import pandas as pd
 from skimage import img_as_ubyte
 import toolz as tz
 from sklearn import neighbors
 from sklearn.preprocessing import StandardScaler
 
+
 # local imports
+from . import config
 from . import io
 from . import screens
 from .screens import cellomics
@@ -219,8 +224,8 @@ def run_montage(args):
 
 features = subpar.add_parser('features',
                              help="Map images to feature vectors.")
-features.add_argument('images', nargs='*', metavar='IM',
-                      help="The input images.")
+features.add_argument('source', type=str,
+                      help="CSV of image URLs")
 features.add_argument('-s', '--screen', default='cellomics',
                       help="The name of the screen being run. Feature maps "
                            "appropriate for the screen should be in the "
@@ -233,9 +238,9 @@ features.add_argument('-b', '--pca-batch-size', type=int, default=384,
 features.add_argument('-n', '--num-neighbours', type=int, default=25,
                       help='The number of nearest neighbours to output '
                            'per sample.')
-features.add_argument('-S', '--sample-size', type=int, default=None,
-                      help='For feature computations that depend on objects, '
-                           'sample this many objects.')
+# features.add_argument('-S', '--sample-size', type=int, default=None,
+#                       help='For feature computations that depend on objects, '
+#                            'sample this many objects.')
 features.add_argument('--random-seed', type=int, default=None,
                       help='Set random seed, for testing and debugging only.')
 features.add_argument('-e', '--emitter', default='json',
@@ -243,56 +248,143 @@ features.add_argument('-e', '--emitter', default='json',
 features.add_argument('-G', '--global-threshold', action='store_true',
                       help='Use sampled intensity from all images to obtain '
                            'a global threshold.')
+features.add_argument('-S', '--settings', type=str, default=None,
+                      help='Settings file')
+
 def run_features(args):
-    """Run image feature computation.
+    """Run image feature computation and dimension reduction on batch of images using yaml settings.
 
     Parameters
     ----------
     args : argparse.Namespace
         The arguments parsed by the argparse library.
     """
-    if args.global_threshold:
-        images = map(io.imread, args.images)
-        thresholds = pre.global_threshold(images, args.random_seed)
+
+    # load config
+    settings = config.load_config(args.settings)
+
+    # load images from location specified in input CSV
+    current_dir = os.path.dirname(args.settings)
+    src = pd.read_csv(args.source)
+    src['url'] = src['url'].apply(lambda x: os.path.join(current_dir, x))
+    ims = map(io.imread, src['url'])
+
+    # import specified feature mapping function
+    p, m = settings['feature-computation']['feature-function']['function'].rsplit('.', 1)
+    feature_mod = import_module(p)
+    feature_map = getattr(feature_mod, m)
+
+    out_path = settings['global']['output-dir']
+    print(current_dir)
+    print(out_path)
+    if out_path == '':
+        # make sister directory to input data
+        if not os.path.isdir(os.path.join(current_dir, 'output')):
+            os.mkdir(os.path.join(current_dir, 'output'))
+            out_path = os.path.join(current_dir, 'output')
+    elif os.path.isabs(out_path):
+        # make absolute path to features.csv
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
     else:
-        thresholds = None
-    images = map(io.imread, args.images)
-    screen_info = screens.d[args.screen]
-    index_function, fmap = screen_info['index'], screen_info['fmap']
-    fmap = tz.partial(fmap, threshold=thresholds,
-                            sample_size=args.sample_size,
-                            random_seed=args.random_seed)
-    indices = list(map(index_function, args.images))
-    f0, feature_names = fmap(next(images))
-    feature_vectors = tz.cons(f0, (fmap(im)[0] for im in images))
-    online_scaler = StandardScaler()
-    online_pca = cluster.OnlineIncrementalPCA(n_components=args.n_components,
-                                              batch_size=args.pca_batch_size)
-    nimages, nfeatures = len(args.images), len(f0)
-    emit = io.emitter_function(args.emitter)
-    with temporary_hdf5_dataset((nimages, nfeatures), 'float') as dset:
-        # First pass: compute the features, compute the mean and SD,
-        # compute the PCA
-        for i, (idx, v) in enumerate(zip(indices, feature_vectors)):
-            emit({'_id': idx, 'feature_vector': list(v)})
-            dset[i] = v
-            online_scaler.partial_fit(v.reshape(1, -1))
-            online_pca.add_sample(v)
-        # Second pass: standardise the feature vectors, compute PCA-transform
-        for i, (idx, v) in enumerate(zip(indices, dset)):
-            v_std = online_scaler.transform(v.reshape(1, -1))[0]
-            v_pca = online_pca.transform(v)
-            dset[i] = v_std
-            emit({'_id': idx, 'feature_vector_std': list(v_std),
-                              'pca_vector': list(v_pca)})
-            online_pca.transform(v)
-        # Third pass: Compute the nearest neighbors graph.
-        # THIS ANNOYINGLY INSTANTIATES FULL ARRAY -- no out-of-core
-        # solution that I'm aware of...
-        ng = neighbors.kneighbors_graph(dset, args.num_neighbours,
-                                        include_self=False, mode='distance')
-        for idx, row in zip(indices, ng):
-            emit({'_id': idx, 'neighbours': [indices[i] for i in row.indices]})
+        cur_path = os.path.split(os.path.abspath(current_dir))
+        out_path = os.path.join(cur_path[0], out_path)
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
+    out_path = os.path.join(out_path, 'features.csv')
+    print(out_path)
+
+    # for each image, compute features (as per config function), save
+    # image_features = output_features(ims, src['url'], )
+    # perform desired transformations
+
+    # save to CSV as mentioned in config
+
+    # if args.global_threshold:
+    #     images = map(io.imread, args.images)
+    #     thresholds = pre.global_threshold(images, args.random_seed)
+    # else:
+    #     thresholds = None
+    # images = map(io.imread, args.images)
+    # screen_info = screens.d[args.screen]
+    # index_function, fmap = screen_info['index'], screen_info['fmap']
+    # fmap = tz.partial(fmap, threshold=thresholds,
+    #                         sample_size=args.sample_size,
+    #                         random_seed=args.random_seed)
+    # indices = list(map(index_function, args.images))
+    # f0, feature_names = fmap(next(images))
+    # feature_vectors = tz.cons(f0, (fmap(im)[0] for im in images))
+    # online_scaler = StandardScaler()
+    # online_pca = cluster.OnlineIncrementalPCA(n_components=args.n_components,
+    #                                           batch_size=args.pca_batch_size)
+    # nimages, nfeatures = len(args.images), len(f0)
+    # emit = io.emitter_function(args.emitter)
+    # with temporary_hdf5_dataset((nimages, nfeatures), 'float') as dset:
+    #     # First pass: compute the features, compute the mean and SD,
+    #     # compute the PCA
+    #     for i, (idx, v) in enumerate(zip(indices, feature_vectors)):
+    #         emit({'_id': idx, 'feature_vector': list(v)})
+    #         dset[i] = v
+    #         online_scaler.partial_fit(v.reshape(1, -1))
+    #         online_pca.add_sample(v)
+    #     # Second pass: standardise the feature vectors, compute PCA-transform
+    #     for i, (idx, v) in enumerate(zip(indices, dset)):
+    #         v_std = online_scaler.transform(v.reshape(1, -1))[0]
+    #         v_pca = online_pca.transform(v)
+    #         dset[i] = v_std
+    #         emit({'_id': idx, 'feature_vector_std': list(v_std),
+    #                           'pca_vector': list(v_pca)})
+    #         online_pca.transform(v)
+    #     # Third pass: Compute the nearest neighbors graph.
+    #     # THIS ANNOYINGLY INSTANTIATES FULL ARRAY -- no out-of-core
+    #     # solution that I'm aware of...
+    #     ng = neighbors.kneighbors_graph(dset, args.num_neighbours,
+    #                                     include_self=False, mode='distance')
+    #     for idx, row in zip(indices, ng):
+    #         emit({'_id': idx, 'neighbours': [indices[i] for i in row.indices]})
+
+
+def output_features(ims, filenames, out_file, feature_map):
+    """Build a feature map for each image in ims and output a dataframe of
+    [filenames, features] to out_file as csv for reading in.
+
+
+    Parameters
+    ----------
+    ims: 3D np.ndarray of float or uint8.
+        the input images
+    filenames: python string list
+        filenames corresponding to each image in ims with relative path to top level directory
+    out_file: string
+        name of CSV file to save dataframe, with relative path to top level directory
+    feature_map: function
+        feature map function to apply
+
+    Returns
+    -------
+    all_image_features: pandas DataFrame
+        raw image features
+    """
+    # generate filenames column to exist as first column of feature DF
+    filenames_col = ["Filenames"]
+    filenames_col.extend(filenames)
+    filenames_col = pd.DataFrame(filenames_col)
+
+    all_image_features = []
+    feature_names = []
+    for im in ims:
+        image_features, feature_names = feature_map(im)
+        all_image_features = all_image_features.append(image_features)
+
+    # convert to dataframe and assign column names
+    all_image_features = pd.DataFrame(all_image_features)
+    all_image_features.columns = feature_names
+
+    # concatenate filenames column to the features and save to CSV.
+    all_image_features = pd.concat([filenames_col, all_image_features], axis=1)
+    all_image_features.to_csv(out_file)
+
+    return all_image_features
 
 
 if __name__ == '__main__':
