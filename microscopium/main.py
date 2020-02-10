@@ -226,28 +226,6 @@ features = subpar.add_parser('features',
                              help="Map images to feature vectors.")
 features.add_argument('source', type=str,
                       help="CSV of image URLs")
-features.add_argument('-s', '--screen', default='cellomics',
-                      help="The name of the screen being run. Feature maps "
-                           "appropriate for the screen should be in the "
-                           "'screens' package.")
-features.add_argument('-c', '--n-components', type=int, default=2,
-                      help='The number of components to compute for PCA.')
-features.add_argument('-b', '--pca-batch-size', type=int, default=384,
-                      help='The number of samples needed for each step of the '
-                           'incremental PCA.')
-features.add_argument('-n', '--num-neighbours', type=int, default=25,
-                      help='The number of nearest neighbours to output '
-                           'per sample.')
-# features.add_argument('-S', '--sample-size', type=int, default=None,
-#                       help='For feature computations that depend on objects, '
-#                            'sample this many objects.')
-features.add_argument('--random-seed', type=int, default=None,
-                      help='Set random seed, for testing and debugging only.')
-features.add_argument('-e', '--emitter', default='json',
-                      help='Format to output features during computation.')
-features.add_argument('-G', '--global-threshold', action='store_true',
-                      help='Use sampled intensity from all images to obtain '
-                           'a global threshold.')
 features.add_argument('-S', '--settings', type=str, default=None,
                       help='Settings file')
 
@@ -287,61 +265,27 @@ def run_features(args):
         if not os.path.exists(out_path):
             os.makedirs(out_path)
     else:
+        # make path relative to parent directory of input
         cur_path = os.path.split(os.path.abspath(current_dir))
         out_path = os.path.join(cur_path[0], out_path)
         if not os.path.exists(out_path):
             os.makedirs(out_path)
     out_path = os.path.join(out_path, 'features.csv')
-    print(out_path)
 
     # for each image, compute features (as per config function), save
-    # image_features = output_features(ims, src['url'], )
-    # perform desired transformations
+    image_features = output_features(ims, src['url'], out_path, feature_map)
 
-    # save to CSV as mentioned in config
+    # temporarily load output csv so as not to compute features
 
-    # if args.global_threshold:
-    #     images = map(io.imread, args.images)
-    #     thresholds = pre.global_threshold(images, args.random_seed)
-    # else:
-    #     thresholds = None
-    # images = map(io.imread, args.images)
-    # screen_info = screens.d[args.screen]
-    # index_function, fmap = screen_info['index'], screen_info['fmap']
-    # fmap = tz.partial(fmap, threshold=thresholds,
-    #                         sample_size=args.sample_size,
-    #                         random_seed=args.random_seed)
-    # indices = list(map(index_function, args.images))
-    # f0, feature_names = fmap(next(images))
-    # feature_vectors = tz.cons(f0, (fmap(im)[0] for im in images))
-    # online_scaler = StandardScaler()
-    # online_pca = cluster.OnlineIncrementalPCA(n_components=args.n_components,
-    #                                           batch_size=args.pca_batch_size)
-    # nimages, nfeatures = len(args.images), len(f0)
-    # emit = io.emitter_function(args.emitter)
-    # with temporary_hdf5_dataset((nimages, nfeatures), 'float') as dset:
-    #     # First pass: compute the features, compute the mean and SD,
-    #     # compute the PCA
-    #     for i, (idx, v) in enumerate(zip(indices, feature_vectors)):
-    #         emit({'_id': idx, 'feature_vector': list(v)})
-    #         dset[i] = v
-    #         online_scaler.partial_fit(v.reshape(1, -1))
-    #         online_pca.add_sample(v)
-    #     # Second pass: standardise the feature vectors, compute PCA-transform
-    #     for i, (idx, v) in enumerate(zip(indices, dset)):
-    #         v_std = online_scaler.transform(v.reshape(1, -1))[0]
-    #         v_pca = online_pca.transform(v)
-    #         dset[i] = v_std
-    #         emit({'_id': idx, 'feature_vector_std': list(v_std),
-    #                           'pca_vector': list(v_pca)})
-    #         online_pca.transform(v)
-    #     # Third pass: Compute the nearest neighbors graph.
-    #     # THIS ANNOYINGLY INSTANTIATES FULL ARRAY -- no out-of-core
-    #     # solution that I'm aware of...
-    #     ng = neighbors.kneighbors_graph(dset, args.num_neighbours,
-    #                                     include_self=False, mode='distance')
-    #     for idx, row in zip(indices, ng):
-    #         emit({'_id': idx, 'neighbours': [indices[i] for i in row.indices]})
+    # strip column names and filenames column leaving just features
+
+    # scale features using StandardScaler().fit_transform(stripped_features.to_numpy())
+
+    # import chosen dim reduction functions
+
+    # perform dim reductions on scaled values
+
+    # concatenate initial csv df with the transformed coords
 
 
 def output_features(ims, filenames, out_file, feature_map):
@@ -372,9 +316,12 @@ def output_features(ims, filenames, out_file, feature_map):
 
     all_image_features = []
     feature_names = []
+    i = len(filenames)
     for im in ims:
-        image_features, feature_names = feature_map(im)
-        all_image_features = all_image_features.append(image_features)
+        image_features, feature_names = feature_map(im, sample_size=100)
+        all_image_features.append(image_features)
+        print("Image processed, {} images remaining.".format(i - 1))
+        i -= 1
 
     # convert to dataframe and assign column names
     all_image_features = pd.DataFrame(all_image_features)
