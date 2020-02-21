@@ -229,6 +229,29 @@ features.add_argument('source', type=str,
 features.add_argument('-S', '--settings', type=str, default=None,
                       help='Settings file')
 
+
+def make_output_dir(out_path, src_dir):
+    if out_path == '':
+        # make sister directory to input data
+        if not os.path.isdir(os.path.join(src_dir, 'output')):
+            os.mkdir(os.path.join(src_dir, 'output'))
+            out_path = os.path.join(src_dir, 'output')
+    elif os.path.isabs(out_path):
+        # make absolute path to features.csv
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
+    else:
+        # make path relative to parent directory of input
+        cur_path = os.path.split(os.path.abspath(src_dir))
+        out_path = os.path.join(cur_path[0], out_path)
+        if not os.path.exists(out_path):
+            os.makedirs(out_path)
+    out_path = os.path.join(out_path, 'features.csv')
+    out_path = os.path.abspath(out_path)
+
+    return out_path
+
+
 def run_features(args):
     """Run image feature computation and dimension reduction on batch of images using yaml settings.
 
@@ -242,40 +265,25 @@ def run_features(args):
     settings = config.load_config(args.settings)
 
     # load images from location specified in input CSV
-    current_dir = os.path.dirname(args.settings)
+    src_dir = os.path.dirname(args.source)
     src = pd.read_csv(args.source)
-    src['url'] = src['url'].apply(lambda x: os.path.join(current_dir, x))
-    ims = map(io.imread, src['url'])
+
+    src['url'] = src['url'].apply(lambda x: os.path.abspath(os.path.join(src_dir, x)))
+    # ims = map(io.imread, src['url'])
 
     # import specified feature mapping function
     p, m = settings['feature-computation']['feature-function']['function'].rsplit('.', 1)
     feature_mod = import_module(p)
     feature_map = getattr(feature_mod, m)
 
-    out_path = settings['global']['output-dir']
-    print(current_dir)
-    print(out_path)
-    if out_path == '':
-        # make sister directory to input data
-        if not os.path.isdir(os.path.join(current_dir, 'output')):
-            os.mkdir(os.path.join(current_dir, 'output'))
-            out_path = os.path.join(current_dir, 'output')
-    elif os.path.isabs(out_path):
-        # make absolute path to features.csv
-        if not os.path.exists(out_path):
-            os.makedirs(out_path)
-    else:
-        # make path relative to parent directory of input
-        cur_path = os.path.split(os.path.abspath(current_dir))
-        out_path = os.path.join(cur_path[0], out_path)
-        if not os.path.exists(out_path):
-            os.makedirs(out_path)
-    out_path = os.path.join(out_path, 'features.csv')
+    # make output directory
+    out_path = make_output_dir(settings['global']['output-dir'], src_dir)
 
     # for each image, compute features (as per config function), save
-    image_features = output_features(ims, src['url'], out_path, feature_map)
+    # image_features = output_features(ims, src['url'], out_path, feature_map)
 
     # temporarily load output csv so as not to compute features
+    image_features = pd.read_csv(out_path)
 
     # strip column names and filenames column leaving just features
 
@@ -286,6 +294,10 @@ def run_features(args):
     # perform dim reductions on scaled values
 
     # concatenate initial csv df with the transformed coords
+    # get path from output to images
+    out_dir = os.path.dirname(out_path)
+    output_to_ims_path = os.path.relpath(os.path.dirname(src['url'][1] ), out_dir)
+    im_from_out_path = os.path.abspath(os.path.join(out_dir, output_to_ims_path, os.path.basename(src['url'][1])))
 
 
 def output_features(ims, filenames, out_file, feature_map):
