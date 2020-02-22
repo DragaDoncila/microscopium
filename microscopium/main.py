@@ -15,7 +15,6 @@ from skimage import img_as_ubyte
 import toolz as tz
 from sklearn import neighbors
 from sklearn.preprocessing import StandardScaler
-import umap
 
 # local imports
 from . import config
@@ -256,10 +255,7 @@ def run_features(args):
     out_path = make_output_dir(settings['global']['output-dir'], src_dir)
 
     # for each image, compute features (as per config function), save
-    # image_features = output_features(ims, src['url'], out_path, feature_map)
-
-    # temporarily load output csv so as not to compute features
-    image_features = pd.read_csv(out_path + "/features.csv")
+    image_features = output_features(ims, src['url'], out_path, feature_map)
 
     out_df = pd.concat([src['index'], src['url'], src['group']], axis=1)
 
