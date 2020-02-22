@@ -15,7 +15,7 @@ from skimage import img_as_ubyte
 import toolz as tz
 from sklearn import neighbors
 from sklearn.preprocessing import StandardScaler
-
+import umap
 
 # local imports
 from . import config
@@ -269,7 +269,7 @@ def run_features(args):
     src = pd.read_csv(args.source)
 
     src['url'] = src['url'].apply(lambda x: os.path.abspath(os.path.join(src_dir, x)))
-    # ims = map(io.imread, src['url'])
+    ims = map(io.imread, src['url'])
 
     # import specified feature mapping function
     p, m = settings['feature-computation']['feature-function']['function'].rsplit('.', 1)
@@ -286,12 +286,23 @@ def run_features(args):
     image_features = pd.read_csv(out_path)
 
     # strip column names and filenames column leaving just features
+    stripped_features = image_features.to_numpy()[:, 2:]
 
     # scale features using StandardScaler().fit_transform(stripped_features.to_numpy())
+    scaled_features = StandardScaler().fit_transform(stripped_features)
 
     # import chosen dim reduction functions
+    embedding_config = settings['embeddings']
 
     # perform dim reductions on scaled values
+    for key, val in enumerate(embedding_config):
+        if val != "default":
+            p, m = embedding_config[val]["class"].rsplit('.', 1)
+            dim_mod = import_module(p)
+            dim_class = getattr(dim_mod, m)
+
+            xy_comp = dim_class().fit_transform(scaled_features)
+
 
     # concatenate initial csv df with the transformed coords
     # get path from output to images
@@ -322,10 +333,9 @@ def output_features(ims, filenames, out_file, feature_map):
         raw image features
     """
     # generate filenames column to exist as first column of feature DF
-    filenames_col = ["Filenames"]
-    filenames_col.extend(filenames)
-    filenames_col = pd.DataFrame(filenames_col)
 
+    filenames_col = pd.DataFrame(filenames)
+    filenames_col.columns = ['url']
     all_image_features = []
     feature_names = []
     i = len(filenames)
